@@ -16,7 +16,6 @@ jobs:
         run: |
           which npx
           npx --version
-          npx webpack
       - name: Get npm cache directory
         id: npm-cache
         run: |
