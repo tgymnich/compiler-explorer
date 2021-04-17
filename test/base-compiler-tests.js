@@ -114,6 +114,16 @@ describe('Compiler execution', function () {
         ldPath: [],
         libPath: [],
     };
+    const someOptionsCompilerInfo = {
+        exe: null,
+        remote: true,
+        lang: languages['c++'].id,
+        ldPath: [],
+        libPath: [],
+        supportsExecute: true,
+        supportsBinary: true,
+        options: '--hello-abc -I"/opt/some thing 1.0/include"',
+    };
 
     before(() => {
         ce = makeCompilationEnvironment({ languages });
@@ -183,6 +193,18 @@ describe('Compiler execution', function () {
     it('buildenv should handle spaces correctly', () => {
         const buildenv = new BuildEnvSetupBase(executingCompilerInfo, ce);
         buildenv.getCompilerArch().should.equal('magic 8bit');
+    });
+
+    it('buildenv compiler without target/march', () => {
+        const buildenv = new BuildEnvSetupBase(noExecuteSupportCompilerInfo, ce);
+        buildenv.getCompilerArch().should.equal(false);
+        buildenv.compilerSupportsX86.should.equal(true);
+    });
+
+    it('buildenv compiler without target/march but with options', () => {
+        const buildenv = new BuildEnvSetupBase(someOptionsCompilerInfo, ce);
+        buildenv.getCompilerArch().should.equal(false);
+        buildenv.compilerSupportsX86.should.equal(true);
     });
 
     it('should compile', async () => {
@@ -444,16 +466,17 @@ describe('Compiler execution', function () {
         // TODO all with demangle: false
     });
 
-    it('should run objdump properly', async () => {
-        const withDemangler = {...noExecuteSupportCompilerInfo, objdumper: 'objdump-exe'};
-        const compiler = new BaseCompiler(withDemangler, ce);
+    async function objdumpTest(type, expectedArgs) {
+        const withObjdumper = {
+            ...noExecuteSupportCompilerInfo,
+            objdumper: 'objdump-exe',
+            objdumperType: type,
+        };
+        const compiler = new BaseCompiler(withObjdumper, ce);
         const execStub = sinon.stub(compiler, 'exec');
         execStub.onCall(0).callsFake((objdumper, args, options) => {
             objdumper.should.equal('objdump-exe');
-            args.should.deep.equal([
-                '-d', 'output',
-                '-l', '--insn-width=16',
-                '-C', '-M', 'intel']);
+            args.should.deep.equal(expectedArgs);
             options.maxOutput.should.equal(123456);
             return Promise.resolve({
                 code: 0,
@@ -470,6 +493,34 @@ describe('Compiler execution', function () {
             true,
             true);
         result.asm.should.deep.equal('the output');
+    }
+
+    it('should run default objdump properly', async () => {
+        return objdumpTest('default', [
+            '-d', 'output',
+            '-l', '--insn-width=16',
+            '-C', '-M', 'intel']);
+    });
+
+    it('should run binutils objdump properly', async () => {
+        return objdumpTest('binutils', [
+            '-d', 'output',
+            '-l', '--insn-width=16',
+            '-C', '-M', 'intel']);
+    });
+
+    it('should run ELF Tool Chain objdump properly', async () => {
+        return objdumpTest('elftoolchain', [
+            '-d', 'output',
+            '-l',
+            '-C', '-M', 'intel']);
+    });
+
+    it('should run LLVM objdump properly', async () => {
+        return objdumpTest('llvm', [
+            '-d', 'output',
+            '-l',
+            '-C', '--x86-asm-syntax=intel']);
     });
 
     it('should run process opt output', async () => {
@@ -494,5 +545,76 @@ Args: []
             displayString: '',
             optType: 'Missed',
         }]);
+    });
+
+    it('should normalize extra file path', () => {
+        const withDemangler = {...noExecuteSupportCompilerInfo, demangler: 'demangler-exe', demanglerType: 'cpp'};
+        const compiler = new BaseCompiler(withDemangler, ce);
+        if (process.platform === 'win32') {
+            compiler.getExtraFilepath('c:/tmp/somefolder', 'test.h').should.equal('c:\\tmp\\somefolder\\test.h');
+        } else {
+            compiler.getExtraFilepath('/tmp/somefolder', 'test.h').should.equal('/tmp/somefolder/test.h');
+        }
+
+        try {
+            compiler.getExtraFilepath('/tmp/somefolder', '../test.h');
+            throw 'Should throw exception';
+        } catch (error) {
+            if (!(error instanceof Error)) {
+                throw error;
+            }
+        }
+
+        try {
+            compiler.getExtraFilepath('/tmp/somefolder', './../test.h');
+            throw 'Should throw exception';
+        } catch (error) {
+            if (!(error instanceof Error)) {
+                throw error;
+            }
+        }
+
+        try {
+            compiler.getExtraFilepath('/tmp/somefolder', '/tmp/someotherfolder/test.h');
+            throw 'Should throw exception';
+        } catch (error) {
+            if (!(error instanceof Error)) {
+                throw error;
+            }
+        }
+
+        try {
+            compiler.getExtraFilepath('/tmp/somefolder', '\\test.h');
+            throw 'Should throw exception';
+        } catch (error) {
+            if (!(error instanceof Error)) {
+                throw error;
+            }
+        }
+
+        try {
+            compiler.getExtraFilepath('/tmp/somefolder', 'test_hello/../../etc/passwd');
+            throw 'Should throw exception';
+        } catch (error) {
+            if (!(error instanceof Error)) {
+                throw error;
+            }
+        }
+
+        if (process.platform === 'win32') {
+            compiler.getExtraFilepath('c:/tmp/somefolder', 'test.txt').should.equal('c:\\tmp\\somefolder\\test.txt');
+        } else {
+            compiler.getExtraFilepath('/tmp/somefolder', 'test.txt').should.equal('/tmp/somefolder/test.txt');
+        }
+
+        // note: subfolders currently not supported, but maybe in the future?
+        try {
+            compiler.getExtraFilepath('/tmp/somefolder', 'subfolder/hello.h');
+            throw 'Should throw exception';
+        } catch (error) {
+            if (!(error instanceof Error)) {
+                throw error;
+            }
+        }
     });
 });
