@@ -37,6 +37,7 @@ NODE_MODULES=.npm-updated
 $(NODE_MODULES): package.json | node-installed
 	$(NPM) install --only=prod $(NPM_FLAGS)
 	$(NPM) install --only=dev $(NPM_FLAGS)
+	@rm -rf node_modules/.cache/esm/*
 	@touch $@
 
 WEBPACK:=./node_modules/webpack-cli/bin/cli.js
@@ -79,7 +80,7 @@ dev: prereqs install-git-hooks ## Runs the site as a developer; including live r
 
 debug: export NODE_ENV=development
 debug: prereqs install-git-hooks ## Runs the site as a developer with full debugging; including live reload support and installation of git hooks
-	./node_modules/.bin/supervisor -w app.js,lib,etc/config -e 'js|node|properties|yaml' -n exit --exec $(NODE) $(NODE_ARGS) -- -r esm ./app.js --debug $(EXTRA_ARGS)
+	./node_modules/.bin/supervisor -w app.js,lib,etc/config -e 'js|node|properties|yaml' -n exit --inspect 9229 --exec $(NODE) $(NODE_ARGS) -- -r esm ./app.js --debug $(EXTRA_ARGS)
 
 HASH := $(shell git rev-parse HEAD)
 dist: export NODE_ENV=production

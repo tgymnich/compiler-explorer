@@ -32,9 +32,8 @@ require('popper.js');
 require('bootstrap');
 require('bootstrap-slider');
 
-var sharing = require('./sharing');
+var Sharing = require('./sharing').Sharing;
 var _ = require('underscore');
-var cloneDeep = require('lodash.clonedeep');
 var $ = require('jquery');
 var GoldenLayout = require('golden-layout');
 var Components = require('./components');
@@ -42,21 +41,20 @@ var url = require('./url');
 var clipboard = require('clipboard');
 var Hub = require('./hub');
 var Sentry = require('@sentry/browser');
-var settings = require('./settings');
+var Settings = require('./settings');
 var local = require('./local');
 var Alert = require('./alert');
 var themer = require('./themes');
 var motd = require('./motd');
 var jsCookie = require('js-cookie');
 var SimpleCook = require('./simplecook');
-var History = require('./history');
 var HistoryWidget = require('./history-widget').HistoryWidget;
 var presentation = require('./presentation');
 
 //css
 require('bootstrap/dist/css/bootstrap.min.css');
 require('golden-layout/src/css/goldenlayout-base.css');
-require('selectize/dist/css/selectize.bootstrap2.css');
+require('tom-select/dist/css/tom-select.bootstrap4.css');
 require('bootstrap-slider/dist/css/bootstrap-slider.css');
 require('./colours.scss');
 require('./explorer.scss');
@@ -102,6 +100,7 @@ function setupSettings(hub) {
                 eventAction: newSettings.colourScheme,
             });
         }
+        $('#settings').find('.editorsFFont').css('font-family', newSettings.editorsFFont);
         currentSettings = newSettings;
         local.set('settings', JSON.stringify(newSettings));
         eventHub.emit('settingsChange', newSettings);
@@ -113,7 +112,7 @@ function setupSettings(hub) {
         eventHub.emit('settingsChange', currentSettings);
     });
 
-    var setSettings = settings($('#settings'), currentSettings, onChange, hub.subdomainLangId);
+    var setSettings = Settings.init($('#settings'), currentSettings, onChange, hub.subdomainLangId);
     eventHub.on('modifySettings', function (newSettings) {
         setSettings(_.extend(currentSettings, newSettings));
     });
@@ -225,8 +224,39 @@ function setupButtons(options) {
     }
 }
 
+function configFromEmbedded(embeddedUrl) {
+    // Old-style link?
+    var params;
+    try {
+        params = url.unrisonify(embeddedUrl);
+    } catch (e) {
+        // Ignore this, it's not a problem
+    }
+    if (params && params.source && params.compiler) {
+        var filters = _.chain((params.filters || '').split(','))
+            .map(function (o) {
+                return [o, true];
+            })
+            .object()
+            .value();
+        return {
+            content: [
+                {
+                    type: 'row',
+                    content: [
+                        Components.getEditorWith(1, params.source, filters),
+                        Components.getCompilerWith(1, filters, params.options, params.compiler),
+                    ],
+                },
+            ],
+        };
+    } else {
+        return url.deserialiseState(embeddedUrl);
+    }
+}
+
 function findConfig(defaultConfig, options) {
-    var config = null;
+    var config;
     if (!options.embedded) {
         if (options.slides) {
             presentation.init(window.compilerExplorerOptions.slides.length);
@@ -260,7 +290,7 @@ function findConfig(defaultConfig, options) {
                 showCloseIcon: false,
                 hasHeaders: false,
             },
-        }, sharing.configFromEmbedded(window.location.hash.substr(1)));
+        }, configFromEmbedded(window.location.hash.substr(1)));
     }
     return config;
 }
@@ -268,8 +298,9 @@ function findConfig(defaultConfig, options) {
 function initializeResetLayoutLink() {
     var currentUrl = document.URL;
     if (currentUrl.includes('/z/')) {
-        $('#ui-brokenlink').attr('href', currentUrl.replace('/z/', '/resetlayout/'));
-        $('#ui-brokenlink').show();
+        $('#ui-brokenlink')
+            .attr('href', currentUrl.replace('/z/', '/resetlayout/'))
+            .show();
     } else {
         $('#ui-brokenlink').hide();
     }
@@ -341,26 +372,6 @@ function initPolicies(options) {
     }
 }
 
-function filterComponentState(config, keysToRemove) {
-    function filterComponentStateImpl(component) {
-        if (component.content) {
-            for (var i = 0; i < component.content.length; i++) {
-                filterComponentStateImpl(component.content[i], keysToRemove);
-            }
-        }
-
-        if (component.componentState) {
-            Object.keys(component.componentState)
-                .filter(function (key) { return keysToRemove.includes(key); })
-                .forEach(function (key) { delete component.componentState[key]; });
-        }
-    }
-
-    config = cloneDeep(config);
-    filterComponentStateImpl(config);
-    return config;
-}
-
 /*
  * this nonsense works around a bug in goldenlayout where a config can be generated
  * that contains a flag indicating there is a maximized item which does not correspond
@@ -373,6 +384,7 @@ function removeOrphanedMaximisedItemFromConfig(config) {
     if (config.maximisedItemId !== '__glMaximised') return;
 
     var found = false;
+
     function impl(component) {
         if (component.id === '__glMaximised') {
             found = true;
@@ -477,30 +489,6 @@ function start() {
         hub = new Hub(layout, subLangId, defaultLangId);
     }
 
-    var lastState = null;
-    var storedPaths = {};  // TODO maybe make this an LRU cache?
-
-    layout.on('stateChanged', function () {
-        var config = filterComponentState(layout.toConfig(), ['selection']);
-        var stringifiedConfig = JSON.stringify(config);
-        if (stringifiedConfig !== lastState) {
-            if (storedPaths[stringifiedConfig]) {
-                window.history.replaceState(null, null, storedPaths[stringifiedConfig]);
-            } else if (window.location.pathname !== window.httpRoot) {
-                window.history.replaceState(null, null, window.httpRoot);
-                // TODO: Add this state to storedPaths, but with a upper bound on the stored state count
-            }
-            lastState = stringifiedConfig;
-
-            History.push(stringifiedConfig);
-        }
-        if (options.embedded) {
-            var strippedToLast = window.location.pathname;
-            strippedToLast = strippedToLast.substr(0, strippedToLast.lastIndexOf('/') + 1);
-            $('a.link').attr('href', strippedToLast + '#' + url.serialiseState(config));
-        }
-    });
-
     function sizeRoot() {
         var height = $(window).height() - (root.position().top || 0) - ($('#simplecook:visible').height() || 0);
         root.height(height);
@@ -525,11 +513,6 @@ function start() {
     if (!options.embedded) {
         setupButtons(options);
     }
-
-    sharing.initShareButton($('#share'), layout, function (config, extra) {
-        window.history.pushState(null, null, extra);
-        storedPaths[JSON.stringify(config)] = extra;
-    });
 
     function setupAdd(thing, func) {
         layout.createDragSource(thing, func);
@@ -592,10 +575,17 @@ function start() {
         window.open(sponsor.url);
     };
 
+    if (options.pageloadUrl) {
+        setTimeout(function () {
+            var visibleIcons = $('.ces-icon:visible').map(function (index, value) {
+                return value.dataset.statsid;
+            }).get().join(',');
+            $.post(options.pageloadUrl + '?icons=' + encodeURIComponent(visibleIcons));
+        }, 5000);
+    }
+
     sizeRoot();
-    var initialConfig = JSON.stringify(filterComponentState(layout.toConfig(), ['selection']));
-    lastState = initialConfig;
-    storedPaths[initialConfig] = window.location.href;
+    new Sharing(layout);
 }
 
 $(start);

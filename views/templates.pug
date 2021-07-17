@@ -1,30 +1,4 @@
 .gl_keep.template
-  .urls
-    .card
-      .card-body
-        .urls-container
-          .btn-group.btn-group-sm
-            .input-group.input-group-sm
-              .input-group-prepend
-                button.btn.btn-sm.btn-light.btn-outline-secondary.dropdown-toggle(data-toggle="dropdown" type="button" aria-haspopup="true" aria-expanded="false")
-                  span.current Short
-                ul.dropdown-menu.sources
-                  if storageSolution !== "null"
-                    button.dropdown-item.btn.btn-light(data-bind="Short")
-                      | Short
-                  button.dropdown-item.btn.btn-light(data-bind="Full")
-                    | Full
-              input.form-control.permalink(type="text" placeholder="Loading" readonly size="1024")
-              .input-group-append
-                button.btn.btn-sm.btn-light.btn-outline-secondary.clippy(type="button" data-clipboard-target=".popover .permalink" title="Copy to clipboard")
-                  span.fa.fa-clipboard
-        div
-          | &nbsp;
-        button.btn.btn-sm.btn-light.btn-outline-secondary.shareembed(data-target="#shareembedlink" data-toggle="modal" data-bind="Embed")
-          | Embedded
-      if sharingEnabled
-        .card-footer
-          .socialsharing
 
   #codeEditor
     .top-bar.btn-toolbar.bg-light(role="toolbar" aria-label="Editor toolbar" name="editor-btn-toolbar")
@@ -69,11 +43,13 @@
   #compiler
     .top-bar.btn-toolbar.bg-light(role="toolbar")
       .btn-group.btn-group-sm(role="group" aria-label="Compiler picker")
-        select.compiler-picker(placeholder="Select a compiler...")
-        .input-group.mb-auto
-          .input-group-prepend(title="Show all compilation options")
-            button.btn.btn-sm.btn-light.input-group-text.prepend-options(data-trigger="click" style="cursor: pointer;" role="button" title="All compilation options")
-              span.status-icon
+        .input-group
+          .input-group-prepend
+            .input-group
+              select.compiler-picker
+              .input-group-append
+                button.btn.btn-sm.btn-light.input-group-text.prepend-options(data-trigger="click" style="cursor: pointer;" role="button" title="All compilation options")
+                  span.status-icon
           input.options.form-control(type="text" placeholder="Compiler options..." size="256" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false")
           .input-group-append.populararguments(title="Popular arguments")
             button.btn.btn-sm.btn-light.btn-outline-secondary.dropdown-toggle.dropdown-toggle-split(type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false")
@@ -149,7 +125,7 @@
         span.short-compiler-name
         button.btn.btn-sm.btn-light.fas.fa-info.full-compiler-name(data-trigger="click" style="cursor: pointer;" role="button")
         span.compile-info(title="Compilation info")
-        button.btn.btn-sm.btn-light.fas.fa-signal.full-timing-info(data-trigger="click" style="cursor: pointer;" role="button")
+        button.btn.btn-sm.btn-light.fas.fa-chart-bar.full-timing-info(data-trigger="click" style="cursor: pointer;" role="button")
 
   #executor
     .top-bar.btn-toolbar.bg-light(role="toolbar")
@@ -178,7 +154,7 @@
         span.fas.fa-redo
     .top-bar.btn-toolbar.bg-light.panel-compilation(role="toolbar")
       .btn-group.btn-group-sm(role="group" aria-label="Compiler picker")
-        select.compiler-picker(placeholder="Select a compiler...")
+        select.compiler-picker
         .input-group.mb-auto
           .input-group-prepend(title="Show all compilation options")
             button.input-group-text.prepend-options(data-trigger="click" style="cursor: pointer;" role="button" title="All compilation options")
@@ -196,7 +172,7 @@
       span.short-compiler-name
       button.btn.btn-sm.btn-light.fas.fa-info.full-compiler-name(data-trigger="click" style="cursor: pointer;" role="button")
       span.compile-time(title="Compilation time (Result size)")
-      button.btn.btn-sm.btn-light.fas.fa-signal.full-timing-info(data-trigger="click" style="cursor: pointer;" role="button")
+      button.btn.btn-sm.btn-light.fas.fa-chart-bar.full-timing-info(data-trigger="click" style="cursor: pointer;" role="button")
 
   #compiler-output
     .top-bar.btn-toolbar.options-toolbar.bg-light(role="toolbar")
@@ -366,7 +342,7 @@
   #compiler-selector
     .form-row
       .col-auto
-        select.compiler-picker(placeholder="Select a compiler...")
+        select.compiler-picker
       .col
         .input-group.mb-auto
           .input-group-prepend(title="Show all compilation options")
@@ -374,7 +350,7 @@
               span.btn.btn-sm.btn-light.status-icon
           input.options.form-control(type="text" placeholder="Compiler options..." size="256" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false")
       .col-1
-        span.fas.fa-receipt.d-none.compiler-out(style="cursor: help;")
+        span.fas.fa-receipt.d-none.compiler-out(style="cursor: help;" title="This compiler has generated some output. Open its associated pane to read it.")
         button.fas.fa-times.close(aria-label="Close" title="Close")
         button.fas.fa-share.close.extract-compiler(aria-label="Pop compiler" title="Show compiler")
 
