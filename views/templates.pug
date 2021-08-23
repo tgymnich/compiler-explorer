@@ -55,6 +55,10 @@
             button.btn.btn-sm.btn-light.btn-outline-secondary.dropdown-toggle.dropdown-toggle-split(type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false")
               span.sr-only Popular arguments
             div.dropdown-menu.dropdown-menu-right
+              button.dropdown-item.btn.btn-light.btn-sm
+                .argmenuitem
+                  span.argtitle Detailed Compiler Flags
+                  span.argdescription Open a new window to edit verbose compiler flags
       include font-size
       .btn-group.btn-group-sm.filters(role="group")
         button.btn.btn-sm.btn-light.dropdown-toggle(type="button" title="Compiler output options" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" aria-label="Change how the compiler's output is generated")
@@ -71,7 +75,7 @@
       .btn-group.btn-group-sm(role="group" aria-label="Compiler additions")
         button.btn.btn-sm.btn-light.show-libs(title="Include libs" aria-label="Toggle libraries dropdown")
           span.fas.fa-book
-          span.hideable &nbsp;Libraries
+          span.dp-text.hideable &nbsp;Libraries
       .btn-group.btn-group-sm(role="group")
         button.btn.btn-sm.btn-light.dropdown-toggle.add-pane(type="button" title="Add a new pane" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false" aria-label="Add new element for this compiler")
           span.fas.fa-plus
@@ -92,6 +96,12 @@
           button.dropdown-item.btn.btn-sm.btn-light.view-ir(title="Show IR output")
             span.dropdown-icon.fas.fa-align-center
             | IR output
+          button.dropdown-item.btn.btn-sm.btn-light.view-device(title="Show Device output")
+            span.dropdown-icon.fas.fa-tv
+            | Device output
+          button.dropdown-item.btn.btn-sm.btn-light.view-rustmir(title="Show Rust MIR output")
+            span.dropdown-icon.fas.fa-water
+            | Rust MIR output
           button.dropdown-item.btn.btn-sm.btn-light.view-gccdump(title="Show Tree/RTL dump (GCC only)")
             span.dropdown-icon.fas.fa-tree
             | GCC Tree/RTL output
@@ -137,7 +147,7 @@
           input.d-none(type="checkbox" checked=false)
         button.btn.btn-sm.btn-light.show-libs(title="Include libs" aria-label="Toggle libraries dropdown")
           span.fas.fa-book
-          span.hideable &nbsp;Libraries
+          span.dp-text.hideable &nbsp;Libraries
       button.btn.btn-sm.btn-light.toggle-compilation.active
         span.fas.fa-cogs
         span.hideable &nbsp;Compilation
@@ -183,6 +193,11 @@
             span Wrap lines
           input.d-none(type="checkbox" checked=false)
     pre.content
+
+  #tool-input
+    .top-bar.btn-toolbar.bg-light(role="toolbar")
+      include font-size.pug
+    .monaco-placeholder
 
   #tool-output
     .top-bar.bad-lang.bg-warning(role="toolbar" style="display: none")
@@ -232,12 +247,29 @@
       include font-size.pug
     .monaco-placeholder
 
+  #flags
+    .top-bar.btn-toolbar.bg-light(role="toolbar")
+      include font-size.pug
+    .monaco-placeholder
+
   #ast
     .top-bar.btn-toolbar.bg-light(role="toolbar")
       include font-size.pug
     .monaco-placeholder
 
   #ir
+    .top-bar.btn-toolbar.bg-light(role="toolbar")
+      include font-size.pug
+    .monaco-placeholder
+
+  #device
+    .top-bar.btn-toolbar.bg-light(role="toolbar")
+      include font-size.pug
+      .btn-group.btn-group-sm(role="group")
+        select.change-device(placeholder="Select a device...")
+    .monaco-placeholder
+
+  #rustmir
     .top-bar.btn-toolbar.bg-light(role="toolbar")
       include font-size.pug
     .monaco-placeholder
@@ -335,7 +367,7 @@
           span.hideable &nbsp;Add compiler
         button.btn.btn-sm.btn-light.show-libs.dropdown-toggle(title="Include libs" aria-label="Toggle libraries dropdown" aria-pressed="false" aria-haspopup="true")
           span.fas.fa-book
-          span.hideable &nbsp;Libraries
+          span.dp-text.hideable &nbsp;Libraries
     .conformance-wrapper
       table.compiler-list
 

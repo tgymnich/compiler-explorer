@@ -43,12 +43,13 @@ var Hub = require('./hub');
 var Sentry = require('@sentry/browser');
 var Settings = require('./settings');
 var local = require('./local');
-var Alert = require('./alert');
+var Alert = require('./alert').Alert;
 var themer = require('./themes');
 var motd = require('./motd');
 var jsCookie = require('js-cookie');
 var SimpleCook = require('./simplecook');
 var HistoryWidget = require('./history-widget').HistoryWidget;
+var History = require('./history');
 var presentation = require('./presentation');
 
 //css
@@ -146,7 +147,9 @@ function setupButtons(options) {
             calcLocaleChangedDate(modal);
             // I can't remember why this check is here as it seems superfluous
             if (options.policies.privacy.enabled) {
-                jsCookie.set(options.policies.privacy.key, options.policies.privacy.hash, {expires: 365});
+                jsCookie.set(options.policies.privacy.key, options.policies.privacy.hash, {
+                    expires: 365, sameSite: 'strict',
+                });
             }
         });
     }
@@ -307,9 +310,6 @@ function initializeResetLayoutLink() {
 }
 
 function initPolicies(options) {
-    // Ensure old cookies are removed, to avoid user confusion
-    jsCookie.remove('fs_uid');
-    jsCookie.remove('cookieconsent_status');
     if (options.policies.privacy.enabled) {
         if (jsCookie.get(options.policies.privacy.key) == null) {
             $('#privacy').trigger('click', {
@@ -332,12 +332,16 @@ function initPolicies(options) {
         }
     }
     simpleCooks.onDoConsent = function () {
-        jsCookie.set(options.policies.cookies.key, options.policies.cookies.hash, {expires: 365});
+        jsCookie.set(options.policies.cookies.key, options.policies.cookies.hash, {
+            expires: 365, sameSite: 'strict',
+        });
         analytics.toggle(true);
     };
     simpleCooks.onDontConsent = function () {
         analytics.toggle(false);
-        jsCookie.set(options.policies.cookies.key, '');
+        jsCookie.set(options.policies.cookies.key, '', {
+            sameSite: 'strict',
+        });
     };
     simpleCooks.onHide = function () {
         var spolicyBellNotification = $('#policyBellNotification');
@@ -585,6 +589,8 @@ function start() {
     }
 
     sizeRoot();
+
+    History.trackHistory(layout);
     new Sharing(layout);
 }
 

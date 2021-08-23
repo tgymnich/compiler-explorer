@@ -34,7 +34,7 @@ var Components = require('../components');
 var LruCache = require('lru-cache');
 var options = require('../options');
 var monaco = require('monaco-editor');
-var Alert = require('../alert');
+var Alert = require('../alert').Alert;
 var bigInt = require('big-integer');
 var Libraries = require('../libs-widget-ext');
 var codeLensHandler = require('../codelens-handler');
@@ -44,6 +44,7 @@ var CompilerPicker = require('../compiler-picker');
 var Settings = require('../settings');
 
 require('../modes/asm-mode');
+require('../modes/asmruby-mode');
 require('../modes/ptx-mode');
 
 var OpcodeCache = new LruCache({
@@ -87,6 +88,7 @@ function Compiler(hub, container, state) {
     this.infoByLang = {};
     this.deferCompiles = hub.deferred;
     this.needsCompile = false;
+    this.deviceViewOpen = false;
     this.options = state.options || options.compileOptions[this.currentLangId];
     this.source = '';
     this.assembly = [];
@@ -96,6 +98,7 @@ function Compiler(hub, container, state) {
     this.pendingRequestSentAt = 0;
     this.nextRequest = null;
     this.optViewOpen = false;
+    this.flagsViewOpen = state.flagsViewOpen || false;
     this.cfgViewOpen = false;
     this.wantOptInfo = state.wantOptInfo;
     this.decorations = {};
@@ -109,6 +112,8 @@ function Compiler(hub, container, state) {
 
     this.linkedFadeTimeoutId = -1;
     this.toolsMenu = null;
+
+    this.revealJumpStack = [];
 
     this.initButtons(state);
 
@@ -197,6 +202,14 @@ Compiler.prototype.initPanerButtons = function () {
             this.sourceEditorId);
     }, this);
 
+    var createFlagsView = _.bind(function () {
+        return Components.getFlagsViewWith(this.id, this.getCompilerName(), this.optionsField.val());
+    }, this);
+
+    if (this.flagsViewOpen) {
+        createFlagsView();
+    }
+
     var createAstView = _.bind(function () {
         return Components.getAstViewWith(this.id, this.source, this.lastResult.astOutput, this.getCompilerName(),
             this.sourceEditorId);
@@ -205,6 +218,16 @@ Compiler.prototype.initPanerButtons = function () {
     var createIrView = _.bind(function () {
         return Components.getIrViewWith(this.id, this.source, this.lastResult.irOutput, this.getCompilerName(),
             this.sourceEditorId);
+    }, this);
+
+    var createDeviceView = _.bind(function () {
+        return Components.getDeviceViewWith(this.id, this.source, this.lastResult.devices, this.getCompilerName(),
+            this.sourceEditorId);
+    }, this);
+
+    var createRustMirView = _.bind(function () {
+        return Components.getRustMirViewWith(this.id, this.source, this.lastResult.rustMirOutput,
+            this.getCompilerName(), this.sourceEditorId);
     }, this);
 
     var createGccDumpView = _.bind(function () {
@@ -256,6 +279,19 @@ Compiler.prototype.initPanerButtons = function () {
         insertPoint.addChild(createOptView);
     }, this));
 
+    var popularArgumentsMenu = this.domRoot.find('div.populararguments div.dropdown-menu');
+    this.container.layoutManager
+        .createDragSource(this.flagsButton, createFlagsView)
+        ._dragListener.on('dragStart', togglePannerAdder);
+
+    this.flagsButton.click(_.bind(function () {
+        var insertPoint = this.hub.findParentRowOrColumn(this.container) ||
+            this.container.layoutManager.root.contentItems[0];
+        insertPoint.addChild(createFlagsView);
+    }, this));
+
+    popularArgumentsMenu.append(this.flagsButton);
+
     this.container.layoutManager
         .createDragSource(this.astButton, createAstView)
         ._dragListener.on('dragStart', togglePannerAdder);
@@ -274,6 +310,26 @@ Compiler.prototype.initPanerButtons = function () {
         var insertPoint = this.hub.findParentRowOrColumn(this.container) ||
             this.container.layoutManager.root.contentItems[0];
         insertPoint.addChild(createIrView);
+    }, this));
+
+    this.container.layoutManager
+        .createDragSource(this.deviceButton, createDeviceView)
+        ._dragListener.on('dragStart', togglePannerAdder);
+
+    this.deviceButton.click(_.bind(function () {
+        var insertPoint = this.hub.findParentRowOrColumn(this.container) ||
+            this.container.layoutManager.root.contentItems[0];
+        insertPoint.addChild(createDeviceView);
+    }, this));
+
+    this.container.layoutManager
+        .createDragSource(this.rustMirButton, createRustMirView)
+        ._dragListener.on('dragStart', togglePannerAdder);
+
+    this.rustMirButton.click(_.bind(function () {
+        var insertPoint = this.hub.findParentRowOrColumn(this.container) ||
+            this.container.layoutManager.root.contentItems[0];
+        insertPoint.addChild(createRustMirView);
     }, this));
 
     this.container.layoutManager
@@ -376,8 +432,9 @@ Compiler.prototype.jumpToLabel = function (position) {
     }
 
     // Highlight the new range.
-    var endLineContent =
-        this.outputEditor.getModel().getLineContent(labelDefLineNum);
+    var endLineContent = this.outputEditor.getModel().getLineContent(labelDefLineNum);
+
+    this.pushRevealJump();
 
     this.outputEditor.setSelection(new monaco.Selection(
         labelDefLineNum, 0,
@@ -387,8 +444,22 @@ Compiler.prototype.jumpToLabel = function (position) {
     this.outputEditor.revealLineInCenter(labelDefLineNum);
 };
 
+Compiler.prototype.pushRevealJump = function () {
+    this.revealJumpStack.push(this.outputEditor.saveViewState());
+    this.revealJumpStackHasElementsCtxKey.set(true);
+};
+
+Compiler.prototype.popAndRevealJump = function () {
+    if (this.revealJumpStack.length > 0) {
+        this.outputEditor.restoreViewState(this.revealJumpStack.pop());
+        this.revealJumpStackHasElementsCtxKey.set(this.revealJumpStack.length > 0);
+    }
+};
+
 Compiler.prototype.initEditorActions = function () {
     this.isLabelCtxKey = this.outputEditor.createContextKey('isLabel', true);
+    this.revealJumpStackHasElementsCtxKey = this.outputEditor.createContextKey('hasRevealJumpStackElements', false);
+    this.isAsmKeywordCtxKey = this.outputEditor.createContextKey('isAsmKeyword', true);
 
     this.outputEditor.addAction({
         id: 'jumptolabel',
@@ -407,12 +478,39 @@ Compiler.prototype.initEditorActions = function () {
     var contextmenu = this.outputEditor.getContribution('editor.contrib.contextmenu');
     var realMethod = contextmenu._onContextMenu;
     contextmenu._onContextMenu = _.bind(function (e) {
-        if (this.isLabelCtxKey && e.target.position) {
-            var label = this.getLabelAtPosition(e.target.position);
-            this.isLabelCtxKey.set(label);
+        if (e && e.target && e.target.position) {
+            if (this.isLabelCtxKey) {
+                var label = this.getLabelAtPosition(e.target.position);
+                this.isLabelCtxKey.set(label !== null);
+            }
+
+            if (this.isAsmKeywordCtxKey) {
+                var currentWord = this.outputEditor.getModel().getWordAtPosition(e.target.position);
+                if (currentWord) {
+                    currentWord.range = new monaco.Range(e.target.position.lineNumber,
+                        Math.max(currentWord.startColumn, 1),
+                        e.target.position.lineNumber, currentWord.endColumn);
+                    if (currentWord.word) {
+                        this.isAsmKeywordCtxKey.set(this.isWordAsmKeyword(currentWord));
+                    }
+                }
+            }
         }
         realMethod.apply(contextmenu, arguments);
     }, this);
+
+
+    this.outputEditor.addAction({
+        id: 'returnfromreveal',
+        label: 'Return from reveal jump',
+        keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter],
+        contextMenuGroupId: 'navigation',
+        contextMenuOrder: 1.4,
+        precondition: 'hasRevealJumpStackElements',
+        run: _.bind(function () {
+            this.popAndRevealJump();
+        }, this),
+    });
 
     this.outputEditor.addAction({
         id: 'viewsource',
@@ -436,6 +534,7 @@ Compiler.prototype.initEditorActions = function () {
         label: 'View assembly documentation',
         keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.F8],
         keybindingContext: null,
+        precondition: 'isAsmKeyword',
         contextMenuGroupId: 'help',
         contextMenuOrder: 1.5,
         run: _.bind(this.onAsmToolTip, this),
@@ -556,6 +655,8 @@ Compiler.prototype.compile = function (bypassCache, newTools) {
             produceOptInfo: this.wantOptInfo,
             produceCfg: this.cfgViewOpen,
             produceIr: this.irViewOpen,
+            produceDevice: this.deviceViewOpen,
+            produceRustMir: this.rustMirViewOpen,
         },
         filters: this.getEffectiveFilters(),
         tools: this.getActiveTools(newTools),
@@ -614,7 +715,7 @@ Compiler.prototype.sendCompile = function (request) {
             if (_.isString(x)) {
                 message = x;
             } else if (x) {
-                message = x.error || x.code;
+                message = x.error || x.code || message;
             }
             onCompilerResponse(request, errorResult('<Compilation failed: ' + message + '>'), false);
         });
@@ -834,6 +935,12 @@ Compiler.prototype.onEditorChange = function (editor, source, langId, compilerId
     }
 };
 
+Compiler.prototype.onCompilerFlagsChange = function (compilerId, compilerFlags) {
+    if (compilerId === this.id) {
+        this.onOptionsChange(compilerFlags);
+    }
+};
+
 Compiler.prototype.onToolOpened = function (compilerId, toolSettings) {
     if (this.id === compilerId) {
         var toolId = toolSettings.toolId;
@@ -889,6 +996,26 @@ Compiler.prototype.onOptViewClosed = function (id) {
     }
 };
 
+Compiler.prototype.onFlagsViewClosed = function (id, compilerFlags) {
+    if (this.id === id) {
+        this.flagsViewOpen = false;
+        this.optionsField.val(compilerFlags);
+        this.optionsField.prop('disabled', this.flagsViewOpen);
+        this.optionsField.prop('placeholder', this.initialOptionsFieldPlacehoder);
+        this.flagsButton.prop('disabled', this.flagsViewOpen);
+
+        this.compilerService.requestPopularArguments(this.compiler.id, compilerFlags).then(
+            _.bind(function (result) {
+                if (result && result.result) {
+                    this.handlePopularArgumentsResult(result.result);
+                }
+            }, this)
+        );
+
+        this.saveState();
+    }
+};
+
 Compiler.prototype.onAstViewOpened = function (id) {
     if (this.id === id) {
         this.astButton.prop('disabled', true);
@@ -922,6 +1049,36 @@ Compiler.prototype.onIrViewClosed = function (id) {
     if (this.id === id) {
         this.irButton.prop('disabled', false);
         this.irViewOpen = false;
+    }
+};
+
+Compiler.prototype.onDeviceViewOpened = function (id) {
+    if (this.id === id) {
+        this.deviceButton.prop('disabled', true);
+        this.deviceViewOpen = true;
+        this.compile();
+    }
+};
+
+Compiler.prototype.onDeviceViewClosed = function (id) {
+    if (this.id === id) {
+        this.deviceButton.prop('disabled', false);
+        this.deviceViewOpen = false;
+    }
+};
+
+Compiler.prototype.onRustMirViewOpened = function (id) {
+    if (this.id === id) {
+        this.rustMirButton.prop('disabled', true);
+        this.rustMirViewOpen = true;
+        this.compile();
+    }
+};
+
+Compiler.prototype.onRustMirViewClosed = function (id) {
+    if (this.id === id) {
+        this.rustMirButton.prop('disabled', false);
+        this.rustMirViewOpen = false;
     }
 };
 
@@ -994,6 +1151,19 @@ Compiler.prototype.onOptViewOpened = function (id) {
     }
 };
 
+Compiler.prototype.onFlagsViewOpened = function (id) {
+    if (this.id === id) {
+        this.flagsViewOpen = true;
+        this.handlePopularArgumentsResult(false);
+        this.optionsField.prop('disabled', this.flagsViewOpen);
+        this.optionsField.val('');
+        this.optionsField.prop('placeholder', 'see detailed flags window');
+        this.flagsButton.prop('disabled', this.flagsViewOpen);
+        this.compile();
+        this.saveState();
+    }
+};
+
 Compiler.prototype.onCfgViewOpened = function (id) {
     if (this.id === id) {
         this.cfgButton.prop('disabled', true);
@@ -1044,8 +1214,11 @@ Compiler.prototype.initButtons = function (state) {
     this.filters = new Toggles(this.domRoot.find('.filters'), patchOldFilters(state.filters));
 
     this.optButton = this.domRoot.find('.btn.view-optimization');
+    this.flagsButton = this.domRoot.find('div.populararguments div.dropdown-menu button');
     this.astButton = this.domRoot.find('.btn.view-ast');
     this.irButton = this.domRoot.find('.btn.view-ir');
+    this.deviceButton = this.domRoot.find('.btn.view-device');
+    this.rustMirButton = this.domRoot.find('.btn.view-rustmir');
     this.gccDumpButton = this.domRoot.find('.btn.view-gccdump');
     this.cfgButton = this.domRoot.find('.btn.view-cfg');
     this.executorButton = this.domRoot.find('.create-executor');
@@ -1059,6 +1232,7 @@ Compiler.prototype.initButtons = function (state) {
     this.outputErrorCount = this.domRoot.find('span.err-count');
 
     this.optionsField = this.domRoot.find('.options');
+    this.initialOptionsFieldPlacehoder = this.optionsField.prop('placeholder');
     this.prependOptions = this.domRoot.find('.prepend-options');
     this.fullCompilerName = this.domRoot.find('.full-compiler-name');
     this.fullTimingInfo = this.domRoot.find('.full-timing-info');
@@ -1124,11 +1298,17 @@ Compiler.prototype.supportsTool = function (toolId) {
 Compiler.prototype.initToolButton = function (togglePannerAdder, button, toolId) {
     var createToolView = _.bind(function () {
         var args = '';
+        var monacoStdin = false;
         var langTools = options.tools[this.currentLangId];
-        if (langTools && langTools[toolId] && langTools[toolId].tool && langTools[toolId].tool.args !== undefined) {
-            args = langTools[toolId].tool.args;
+        if (langTools && langTools[toolId] && langTools[toolId].tool) {
+            if (langTools[toolId].tool.args !== undefined) {
+                args = langTools[toolId].tool.args;
+            }
+            if (langTools[toolId].tool.monacoStdin !== undefined) {
+                monacoStdin = langTools[toolId].tool.monacoStdin;
+            }
         }
-        return Components.getToolViewWith(this.id, this.sourceEditorId, toolId, args);
+        return Components.getToolViewWith(this.id, this.sourceEditorId, toolId, args, monacoStdin);
     }, this);
 
     this.container.layoutManager
@@ -1219,24 +1399,39 @@ Compiler.prototype.updateButtons = function () {
     this.filterTrimButton.prop('disabled', this.compiler.disabledFilters.indexOf('trim') !== -1);
     formatFilterTitle(this.filterTrimButton, this.filterTrimTitle);
 
-    this.optButton.prop('disabled', this.optViewOpen || !this.compiler.supportsOptOutput);
-    this.astButton.prop('disabled', this.astViewOpen || !this.compiler.supportsAstView);
-    this.irButton.prop('disabled', this.irViewOpen || !this.compiler.supportsIrView);
-    this.cfgButton.prop('disabled', this.cfgViewOpen || !this.compiler.supportsCfg);
-    this.gccDumpButton.prop('disabled', this.gccDumpViewOpen || !this.compiler.supportsGccDump);
+    if (this.flagsButton) {
+        this.flagsButton.prop('disabled', this.flagsViewOpen);
+    }
+    this.optButton.prop('disabled', this.optViewOpen);
+    this.astButton.prop('disabled', this.astViewOpen);
+    this.irButton.prop('disabled', this.irViewOpen);
+    this.deviceButton.prop('disabled', this.deviceViewOpen);
+    this.rustMirButton.prop('disabled', this.rustMirViewOpen);
+    this.cfgButton.prop('disabled', this.cfgViewOpen);
+    this.gccDumpButton.prop('disabled', this.gccDumpViewOpen);
+    // The executorButton does not need to be changed here, because you can create however
+    // many executors as you want.
 
-    this.executorButton.prop('disabled', !this.compiler.supportsExecute);
+    this.optButton.toggle(!!this.compiler.supportsOptOutput);
+    this.astButton.toggle(!!this.compiler.supportsAstView);
+    this.irButton.toggle(!!this.compiler.supportsIrView);
+    this.deviceButton.toggle(!!this.compiler.supportsDeviceAsmView);
+    this.rustMirButton.toggle(!!this.compiler.supportsRustMirView);
+    this.cfgButton.toggle(!!this.compiler.supportsCfg);
+    this.gccDumpButton.toggle(!!this.compiler.supportsGccDump);
+    this.executorButton.toggle(!!this.compiler.supportsExecute);
 
     this.enableToolButtons();
 };
 
 Compiler.prototype.handlePopularArgumentsResult = function (result) {
-    var popularArgumentsMenu = this.domRoot.find('div.populararguments div.dropdown-menu');
-    popularArgumentsMenu.html('');
+    var popularArgumentsMenu = $(this.domRoot.find('div.populararguments div.dropdown-menu'));
 
-    if (result) {
-        var addedOption = false;
+    while (popularArgumentsMenu.children().length > 1) {
+        popularArgumentsMenu.children()[1].remove();
+    }
 
+    if (result && !this.flagsViewOpen) {
         _.forEach(result, _.bind(function (arg, key) {
             var argumentButton = $(document.createElement('button'));
             argumentButton.addClass('dropdown-item btn btn-light btn-sm');
@@ -1261,16 +1456,8 @@ Compiler.prototype.handlePopularArgumentsResult = function (result) {
             }, this));
 
             popularArgumentsMenu.append(argumentButton);
-            addedOption = true;
         }, this));
 
-        if (!addedOption) {
-            $('div.populararguments').hide();
-        } else {
-            $('div.populararguments').show();
-        }
-    } else {
-        $('div.populararguments').hide();
     }
 };
 
@@ -1289,6 +1476,7 @@ Compiler.prototype.initListeners = function () {
         this.eventHub.emit('compilerOpen', this.id, this.sourceEditorId);
     }, this);
     this.eventHub.on('editorChange', this.onEditorChange, this);
+    this.eventHub.on('compilerFlagsChange', this.onCompilerFlagsChange, this);
     this.eventHub.on('editorClose', this.onEditorClose, this);
     this.eventHub.on('colours', this.onColours, this);
     this.eventHub.on('resendCompilation', this.onResendCompilation, this);
@@ -1304,10 +1492,16 @@ Compiler.prototype.initListeners = function () {
 
     this.eventHub.on('optViewOpened', this.onOptViewOpened, this);
     this.eventHub.on('optViewClosed', this.onOptViewClosed, this);
+    this.eventHub.on('flagsViewOpened', this.onFlagsViewOpened, this);
+    this.eventHub.on('flagsViewClosed', this.onFlagsViewClosed, this);
     this.eventHub.on('astViewOpened', this.onAstViewOpened, this);
     this.eventHub.on('astViewClosed', this.onAstViewClosed, this);
     this.eventHub.on('irViewOpened', this.onIrViewOpened, this);
     this.eventHub.on('irViewClosed', this.onIrViewClosed, this);
+    this.eventHub.on('deviceViewOpened', this.onDeviceViewOpened, this);
+    this.eventHub.on('deviceViewClosed', this.onDeviceViewClosed, this);
+    this.eventHub.on('rustMirViewOpened', this.onRustMirViewOpened, this);
+    this.eventHub.on('rustMirViewClosed', this.onRustMirViewClosed, this);
     this.eventHub.on('outputOpened', this.onOutputOpened, this);
     this.eventHub.on('outputClosed', this.onOutputClosed, this);
 
@@ -1443,10 +1637,16 @@ Compiler.prototype.updateCompilerUI = function () {
 
 Compiler.prototype.onCompilerChange = function (value) {
     this.compiler = this.compilerService.findCompiler(this.currentLangId, value);
+
+    this.deferCompiles = true;
+    this.needsCompile = true;
+
     this.updateLibraries();
     this.saveState();
-    this.compile();
     this.updateCompilerUI();
+
+    this.undefer();
+
     this.sendCompiler();
 };
 
@@ -1485,6 +1685,7 @@ Compiler.prototype.currentState = function () {
         libs: this.libsWidget.get(),
         lang: this.currentLangId,
         selection: this.selection,
+        flagsViewOpen: this.flagsViewOpen,
     };
     this.fontScale.addState(state);
     return state;
@@ -1519,7 +1720,7 @@ Compiler.prototype.getLanguageName = function () {
 Compiler.prototype.getPaneName = function () {
     var langName = this.getLanguageName();
     var compName = this.getCompilerName();
-    return compName + ' (Editor #' + this.sourceEditorId + ', Compiler #' + this.id + ') ' + langName;
+    return compName + ' (' + langName +', Editor #' + this.sourceEditorId + ', Compiler #' + this.id + ')';
 };
 
 Compiler.prototype.updateCompilerName = function () {
@@ -1571,7 +1772,12 @@ Compiler.prototype.onPanesLinkLine = function (compilerId, lineNumber, colBegin,
                 }
             }
         });
-        if (revealLine && lineNums[0]) this.outputEditor.revealLineInCenter(lineNums[0]);
+
+        if (revealLine && lineNums[0]) {
+            this.pushRevealJump();
+            this.outputEditor.revealLineInCenter(lineNums[0]);
+        }
+
         var lineClass = sender !== this.getPaneName() ? 'linked-code-decoration-line' : '';
         var linkedLinesDecoration = _.map(lineNums, function (line) {
             return {
@@ -1606,7 +1812,10 @@ Compiler.prototype.onPanesLinkLine = function (compilerId, lineNumber, colBegin,
 
 Compiler.prototype.onCompilerSetDecorations = function (id, lineNums, revealLine) {
     if (Number(id) === this.id) {
-        if (revealLine && lineNums[0]) this.outputEditor.revealLineInCenter(lineNums[0]);
+        if (revealLine && lineNums[0]) {
+            this.pushRevealJump();
+            this.outputEditor.revealLineInCenter(lineNums[0]);
+        }
         this.decorations.linkedCode = _.map(lineNums, function (line) {
             return {
                 range: new monaco.Range(line, 1, line, 1),
@@ -1642,8 +1851,11 @@ Compiler.prototype.setCompilerVersionPopover = function (version, notification) 
     bodyContent.append(versionContent);
     if (version.fullVersion) {
         var hiddenSection = $('<div>');
+        var lines = _.map(version.fullVersion.split('\n'), function (line) {
+            return _.escape(line);
+        }).join('<br/>');
         var hiddenVersionText = $('<div>')
-            .html(_.escape(version.fullVersion))
+            .html(lines)
             .hide();
         var clickToExpandContent = $('<a>')
             .attr('href', 'javascript:;')
@@ -1754,10 +1966,11 @@ Compiler.prototype.onMouseUp = function (e) {
 
 Compiler.prototype.onMouseMove = function (e) {
     if (e === null || e.target === null || e.target.position === null) return;
-    if (this.settings.hoverShowSource === true && this.assembly) {
-        this.clearLinkedLines();
+    var hoverShowSource = this.settings.hoverShowSource === true;
+    if (this.assembly) {
         var hoverAsm = this.assembly[e.target.position.lineNumber - 1];
-        if (hoverAsm) {
+        if (hoverShowSource && hoverAsm) {
+            this.clearLinkedLines();
             // We check that we actually have something to show at this point!
             var sourceLine = -1;
             var sourceColBegin = -1;
@@ -1805,36 +2018,37 @@ Compiler.prototype.onMouseMove = function (e) {
             this.updateDecorations();
         }
 
-        if (this.getEffectiveFilters().intel) {
-            var lineTokens = _.bind(function (model, line) {
-                //Force line's state to be accurate
-                if (line > model.getLineCount()) return [];
-                var flavour = model.getModeId();
-                var tokens = monaco.editor.tokenize(model.getLineContent(line), flavour);
-                return tokens.length > 0 ? tokens[0] : [];
-            }, this);
-
-            if (this.settings.hoverShowAsmDoc === true &&
-                _.some(lineTokens(this.outputEditor.getModel(), currentWord.range.startLineNumber), function (t) {
-                    return t.offset + 1 === currentWord.startColumn && t.type === 'keyword.asm';
-                })) {
-                getAsmInfo(currentWord.word, this.compiler.instructionSet).then(_.bind(function (response) {
-                    if (!response) return;
-                    this.decorations.asmToolTip = {
-                        range: currentWord.range,
-                        options: {
-                            isWholeLine: false,
-                            hoverMessage: [{
-                                value: response.tooltip + '\n\nMore information available in the context menu.',
-                                isTrusted: true,
-                            }],
-                        },
-                    };
-                    this.updateDecorations();
-                }, this));
-            }
+        if (hoverShowSource && this.isWordAsmKeyword(currentWord)) {
+            getAsmInfo(currentWord.word, this.compiler.instructionSet).then(_.bind(function (response) {
+                if (!response) return;
+                this.decorations.asmToolTip = {
+                    range: currentWord.range,
+                    options: {
+                        isWholeLine: false,
+                        hoverMessage: [{
+                            value: response.tooltip + '\n\nMore information available in the context menu.',
+                            isTrusted: true,
+                        }],
+                    },
+                };
+                this.updateDecorations();
+            }, this));
         }
     }
+};
+
+Compiler.prototype.getLineTokens = function (line) {
+    var model = this.outputEditor.getModel();
+    if (!model || line > model.getLineCount()) return [];
+    var flavour = model.getModeId();
+    var tokens = monaco.editor.tokenize(model.getLineContent(line), flavour);
+    return tokens.length > 0 ? tokens[0] : [];
+};
+
+Compiler.prototype.isWordAsmKeyword = function (word) {
+    return _.some(this.getLineTokens(word.range.startLineNumber), function (t) {
+        return t.offset + 1 === word.startColumn && t.type === 'keyword.asm';
+    });
 };
 
 Compiler.prototype.onAsmToolTip = function (ed) {
@@ -1902,11 +2116,17 @@ Compiler.prototype.onLanguageChange = function (editorId, newLangId) {
             options: this.options,
         };
         var info = this.infoByLang[this.currentLangId] || {};
+        this.deferCompiles = true;
         this.initLangAndCompiler({lang: newLangId, compiler: info.compiler});
         this.updateCompilersSelector(info);
-        this.updateCompilerUI();
-        this.sendCompiler();
         this.saveState();
+        this.updateCompilerUI();
+
+        // this is a workaround to delay compilation further until the Editor sends a compile request
+        this.needsCompile = false;
+
+        this.undefer();
+        this.sendCompiler();
     }
 };
 
